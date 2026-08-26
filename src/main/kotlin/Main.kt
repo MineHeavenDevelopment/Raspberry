@@ -1,5 +1,6 @@
 package ir.nayragames
 
-fun main() {
+import ir.nayragames.Utils.Stats
 
+fun main() {
 }
