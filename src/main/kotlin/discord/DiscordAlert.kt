@@ -20,7 +20,6 @@ fun alert(
     try {
         val jda = JDABuilder.createDefault(botToken).build()
         jda.awaitReady()
-
         val embed = EmbedBuilder().apply {
             setTitle(title)
             setDescription(description)
