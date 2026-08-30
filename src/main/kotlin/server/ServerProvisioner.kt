@@ -46,6 +46,41 @@ class ServerProvisioner(
     // reuse the canonical container-name format and owned-prefix listing.
     fun incusLauncherOrNull(): incus.IncusLauncher? = launcher as? incus.IncusLauncher
 
+    // Iran-friendly shared cache: pre-downloaded jars (mojang_{v}.jar etc) are
+    // copied from the global cache dir into each new workspace so paperclip
+    // never needs to re-download them. After a successful boot, new cache jars
+    // are promoted back into the global cache for the next server.
+    private fun cacheDir(): File = File("./cache").apply { mkdirs() }
+
+    private fun seedServerCache(workspace: File, version: String, requestId: String) {
+        val src = cacheDir()
+        if (!src.isDirectory) return
+        val dst = File(workspace, "cache").apply { mkdirs() }
+        // mojang vanilla jar used by paperclip/fabric/forge installers
+        for (name in listOf("mojang_$version.jar", "server_$version.jar")) {
+            val f = File(src, name)
+            if (f.isFile && !File(dst, name).exists()) {
+                f.copyTo(File(dst, name), overwrite = false)
+                logger("operation=cache server_id=$requestId result=seed file=$name", error = false)
+            }
+        }
+    }
+
+    private fun promoteServerCache(workspace: File, version: String) {
+        val ws = File(workspace, "cache")
+        if (!ws.isDirectory) return
+        val dst = cacheDir()
+        for (f in ws.listFiles() ?: emptyArray()) {
+            if (!f.isFile) continue
+            if (f.name.startsWith("mojang_$version") && f.length() > 1_000_000) {
+                val target = File(dst, f.name)
+                if (!target.exists()) {
+                    f.copyTo(target, overwrite = false)
+                    logger("operation=cache result=promote file=${f.name} size=${f.length()}", error = false)
+                }
+            }
+        }
+    }
     private val fileHttp: HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.ALWAYS)
         .connectTimeout(Duration.ofSeconds(15))
@@ -123,6 +158,7 @@ class ServerProvisioner(
 
         writeEula(workspace)
         writeServerProperties(workspace, s, port)
+        seedServerCache(workspace, s.version, requestId)
         downloadFiles(workspace, "plugins", s.plugins)
         downloadFiles(workspace, "mods", s.mods)
 
@@ -146,6 +182,7 @@ class ServerProvisioner(
         }
 
         rs.status = "running"
+        promoteServerCache(workspace, s.version)
         logger("operation=provision server_id=$requestId result=success port=$port", error = false)
         events.buildSuccess(job.requestId, config.node.publicHost, port)
     }
@@ -158,6 +195,7 @@ class ServerProvisioner(
             throw IllegalStateException("Server '$requestId' has no workspace on this node (cannot start)")
         }
         val meta = ServerMeta.fromJson(JSONObject(metaFile.readText()))
+        seedServerCache(workspace, meta.settings.version, requestId)
         val existing = registry.get(requestId)
         val rs = existing ?: registry.registerProvisioning(meta, workspace).also { it.status = "stopped" }
         if (rs.status == "running" && rs.process?.isAlive == true) {
