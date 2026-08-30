@@ -1,34 +1,37 @@
 package managers
 
-import utils.logger
+import config.AppConfig
+import job.CoreJob
+import job.JobConsumer
+import redis.EventPublisher
 import redis.RedisPublisher
-import redis.RedisSubscriber
-import redis.clients.jedis.Jedis
-import kotlin.concurrent.thread
+import utils.logger
 
-class RedisManager {
-    private val config = ConfigManager.loadConfig().redis
+class RedisManager(
+    private val config: AppConfig,
+    private val onCreate: (CoreJob.CreateServer) -> Unit = { _ -> },
+    private val onPower: (CoreJob.PowerServer) -> Unit = { _ -> }
+) {
+    private val redisConfig = config.redis
 
-    val publisher = RedisPublisher(config.address, config.port, config.channel)
-    val subscriber = RedisSubscriber()
+    val publisher = RedisPublisher(redisConfig.address, redisConfig.port, redisConfig.channel)
+    val events = EventPublisher(publisher, redisConfig.eventsChannel)
 
-    fun startListening() {
-        logger("Connecting to Redis at ${config.address}:${config.port}...", error = false)
+    private val consumer = JobConsumer(
+        address = redisConfig.address,
+        port = redisConfig.port,
+        jobsChannel = redisConfig.jobsChannel,
+        legacyChannel = redisConfig.channel,
+        onCreate = onCreate,
+        onPower = onPower
+    )
 
-        thread(name = "Redis-Subscriber-Thread") {
-            try {
-                Jedis(config.address, config.port).use { jedis ->
-                    jedis.subscribe(subscriber, config.channel)
-                }
-            } catch (e: Exception) {
-                logger("Redis subscriber error: ${e.stackTraceToString()}", error = true)
-            }
-        }
+    fun startConsumer() {
+        logger("Connecting to Redis at ${redisConfig.address}:${redisConfig.port}...", error = false)
+        consumer.start()
     }
 
-    fun stopListening() {
-        if (subscriber.isSubscribed) {
-            subscriber.unsubscribe()
-        }
+    fun stopConsumer() {
+        consumer.stop()
     }
 }

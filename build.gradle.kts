@@ -1,6 +1,8 @@
-
+﻿
 plugins {
     kotlin("jvm") version "2.3.21"
+    application
+    kotlin("plugin.serialization") version "2.3.21"
 }
 
 group = "ir.nayragames"
@@ -13,7 +15,12 @@ repositories {
 val ktorVersion = "3.0.3"
 
 dependencies {
+    // Kotlin test (resolves the junit5 variant via capability) + JUnit platform engine
     testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.4")
+
     implementation("org.json:json:20240303")
     implementation("redis.clients:jedis:7.2.0")
     implementation("com.akuleshov7:ktoml-core:0.5.1")
@@ -41,7 +48,6 @@ dependencies {
 
     // Testing
     testImplementation("io.ktor:ktor-server-test-host-jvm:$ktorVersion")
-    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:$ktorVersion")
 
     // Client Core & Engine (CIO)
     implementation("io.ktor:ktor-client-core-jvm:${ktorVersion}")
@@ -53,6 +59,10 @@ dependencies {
 
     // Client Logging
     implementation("io.ktor:ktor-client-logging-jvm:${ktorVersion}")
+}
+
+application {
+    mainClass.set("ir.nayragames.MainKt")
 }
 
 kotlin {
