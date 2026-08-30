@@ -18,6 +18,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.utils.io.jvm.javaio.toInputStream
@@ -363,6 +364,48 @@ fun Application.module() {
                             respondJson(call, JSONObject().put("ok", true))
                         } else {
                             respondJson(call, JSONObject().put("error", "could not delete file"), HttpStatusCode.InternalServerError)
+                        }
+                    }
+                }
+            }
+
+            // ---- P2 text file edit ----
+            put("/servers/{request_id}/files") {
+                if (!call.authorized(config)) return@put
+                val id = sanitizeId(call.parameters["request_id"] ?: "")
+                if (id.isEmpty()) {
+                    return@put respondJson(call, JSONObject().put("error", "missing request_id"), HttpStatusCode.BadRequest)
+                }
+                val root = File("./servers/$id")
+                if (!File(root, "metadata.json").exists()) {
+                    return@put respondJson(call, JSONObject().put("error", "unknown server_id on this node"), HttpStatusCode.NotFound)
+                }
+                val subdir = call.request.queryParameters["subdir"] ?: "plugins"
+                val name = call.request.queryParameters["name"] ?: ""
+                when (val check = SafePaths.validateEdit(root, subdir, name)) {
+                    is SafePaths.Validation.Reject ->
+                        respondJson(call, JSONObject().put("error", check.reason), HttpStatusCode.BadRequest)
+                    is SafePaths.Validation.Ok -> {
+                        val dest = check.file
+                        val body = call.receiveText()
+                        val maxBytes = config.api.maxUploadMb.toLong() * 1024L * 1024L
+                        if (body.toByteArray().size > maxBytes) {
+                            return@put respondJson(call, JSONObject().put("error", "content too large"), HttpStatusCode.PayloadTooLarge)
+                        }
+                        val tmp = File(dest.parentFile, dest.name + ".edit-" + System.currentTimeMillis() + ".tmp")
+                        try {
+                            dest.parentFile?.mkdirs()
+                            tmp.writeText(body, Charsets.UTF_8)
+                            try {
+                                Files.move(tmp.toPath(), dest.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                            } catch (e: Exception) {
+                                Files.move(tmp.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                            }
+                            logger("operation=file_edit server_id=$id result=success file=${dest.name} bytes=${body.length}", error = false)
+                            respondJson(call, JSONObject().put("ok", true).put("file", dest.name).put("size", body.length))
+                        } catch (e: Exception) {
+                            tmp.delete()
+                            respondJson(call, JSONObject().put("error", "save failed: ${e.message}"), HttpStatusCode.InternalServerError)
                         }
                     }
                 }

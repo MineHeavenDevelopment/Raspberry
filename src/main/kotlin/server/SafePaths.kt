@@ -117,6 +117,18 @@ object SafePaths {
         return Validation.Ok(dest)
     }
 
+    // P2: edit guard - only text files, reasonable size, inside root.
+    val EDITABLE_EXTENSIONS = setOf("yml", "yaml", "properties", "json", "txt", "conf", "motd", "toml", "cfg", "md", "sh", "log")
+    fun validateEdit(serverRoot: File, subdir: String, rawName: String): Validation {
+        val r = validateRead(serverRoot, subdir, rawName)
+        if (r is Validation.Reject) return r
+        val file = (r as Validation.Ok).file
+        val ext = file.extension.lowercase()
+        if (ext !in EDITABLE_EXTENSIONS) {
+            return Validation.Reject("only text files can be edited (allowed: $EDITABLE_EXTENSIONS)")
+        }
+        return Validation.Ok(file)
+    }
     // P1: delete guard — inside root, valid subdir, never core-managed files.
     fun validateDelete(serverRoot: File, subdir: String, rawName: String): Validation {
         val r = validateRead(serverRoot, subdir, rawName)
