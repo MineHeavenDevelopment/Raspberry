@@ -264,10 +264,21 @@ fun Application.module() {
                 } catch (e: Exception) {
                     return@post respondJson(call, JSONObject().put("error", "invalid JSON body"), HttpStatusCode.BadRequest)
                 }
-                val command = body.optString("command").trim()
-                if (command.isEmpty()) {
+                val rawCommand = body.optString("command").trim()
+                if (rawCommand.isEmpty()) {
                     return@post respondJson(call, JSONObject().put("error", "command is required"), HttpStatusCode.BadRequest)
                 }
+                // OS/safety guard: console input stays inside the Minecraft server.
+                // Control chars and shell metacharacters are rejected; "stop" is reserved
+                // for the power API so core tracking stays consistent.
+                if (rawCommand.any { it.code < 32 }) {
+                    return@post respondJson(call, JSONObject().put("error", "control characters are not allowed"), HttpStatusCode.BadRequest)
+                }
+                val forbiddenChars = "\u0026\u007C\u003B\u003E\u003C\u0060\u0024\u0028\u0029\u007B\u007D\u005B\u005D\u0021\u005C\u0022\u0027\u005E\u0025\u0040"
+                if (rawCommand.any { forbiddenChars.indexOf(it) >= 0 }) {
+                    return@post respondJson(call, JSONObject().put("error", "shell metacharacters are not allowed in commands"), HttpStatusCode.BadRequest)
+                }
+                val command = rawCommand
                 val process = registry.get(sanitizeId(id))?.process
                 if (process == null || !process.isAlive) {
                     return@post respondJson(call, JSONObject().put("error", "server is not running"), HttpStatusCode.Conflict)
