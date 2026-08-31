@@ -188,6 +188,38 @@ class ServerProvisioner(
         events.buildSuccess(job.requestId, config.node.publicHost, port)
     }
 
+    // Resolve the PID listening on the given port (Windows: netstat -ano, Linux: ss/lsof).
+    private fun findPidOnPort(port: Int): Long? {
+        return try {
+            val isWin = System.getProperty("os.name").lowercase().contains("windows")
+            val line: String? = if (isWin) {
+                val pr = ProcessBuilder("cmd", "/c", "netstat", "-ano", "-p", "TCP").start()
+                pr.inputStream.bufferedReader().readLines().firstOrNull {
+                    it.contains(":$port ") && it.contains("LISTENING")
+                }
+            } else {
+                val pr = ProcessBuilder("ss", "-lptn").start()
+                pr.inputStream.bufferedReader().readLines().firstOrNull { it.contains(":$port ") }
+            }
+            line?.trim()?.split(Regex("\\s+"))?.lastOrNull()?.toLongOrNull()
+        } catch (e: Exception) {
+            logger("findPidOnPort($port) failed: ${e.message}", error = true)
+            null
+        }
+    }
+
+    private fun killPidOnPort(port: Int) {
+        val pid = findPidOnPort(port) ?: return
+        try {
+            logger("Killing orphan pid $pid on port $port", error = false)
+            val isWin = System.getProperty("os.name").lowercase().contains("windows")
+            if (isWin) ProcessBuilder("taskkill", "/F", "/PID", pid.toString()).start().waitFor()
+            else ProcessBuilder("kill", "-9", pid.toString()).start().waitFor()
+        } catch (e: Exception) {
+            logger("killPidOnPort($port) failed: ${e.message}", error = true)
+        }
+    }
+
     // Power-start of an existing (recovered or stopped) workspace.
     fun startExisting(requestId: String) {
         val workspace = File(serversDir, requestId)
@@ -213,13 +245,14 @@ class ServerProvisioner(
         // If the world port is already served by an orphan JVM (survived a core restart),
         // adopt it instead of launching a second process that dies on the session.lock.
         if (isPortListening(meta.port)) {
-            logger("Server $requestId port ${meta.port} already listening - adopting running process", error = false)
-            rs.status = "running"
-            if (rs.console == null) {
-                val logFile = rotateLog(workspace)
-                rs.console = ConsoleRouter(logFile).also { it.start() }
-            }
-            return
+            // The port is served, but we have no Process handle (orphan from a previous
+            // core run or adopted-boot). A JVM we do not own gives us no stdin, so the
+            // console would be read-only. Kill the orphan and relaunch under our control
+            // so commands work - the world state is on disk, a reboot is safe.
+            logger("Server $requestId port ${meta.port} already listening - taking over orphan process", error = false)
+            killPidOnPort(meta.port)
+            val deadline = System.currentTimeMillis() + 15_000
+            while (isPortListening(meta.port) && System.currentTimeMillis() < deadline) Thread.sleep(300)
         }
 
         val logFile = rotateLog(workspace)
