@@ -278,6 +278,9 @@ fun Application.module() {
                 if (rawCommand.any { forbiddenChars.indexOf(it) >= 0 }) {
                     return@post respondJson(call, JSONObject().put("error", "shell metacharacters are not allowed in commands"), HttpStatusCode.BadRequest)
                 }
+                if (rawCommand.equals("stop", ignoreCase = true) || rawCommand.lowercase().startsWith("stop ")) {
+                    return@post respondJson(call, JSONObject().put("error", "use the Stop button (power API) instead of the stop command"), HttpStatusCode.Forbidden)
+                }
                 val command = rawCommand
                 val process = registry.get(sanitizeId(id))?.process
                 if (process == null || !process.isAlive) {
@@ -529,5 +532,4 @@ fun Application.module() {
                 }
             }
         }
-    }
-}
+    }}
