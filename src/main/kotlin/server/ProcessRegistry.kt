@@ -45,6 +45,7 @@ class RunningServer(
     val workspace: File
 ) {
     @Volatile var status: String = "provisioning"   // provisioning | running | stopped | failed
+    @Volatile var lastError: String = ""            // human-readable failure reason (empty if none)
     @Volatile var process: Process? = null
     @Volatile var stopRequested: Boolean = false
     @Volatile var console: ConsoleRouter? = null
@@ -67,6 +68,7 @@ class RunningServer(
     fun statusJson(publicHost: String): JSONObject = JSONObject().apply {
         put("request_id", requestId)
         put("status", status)
+        put("last_error", lastError)
         put("port", port)
         put("ip", publicHost)
         put("players", console?.players()?.size ?: 0)

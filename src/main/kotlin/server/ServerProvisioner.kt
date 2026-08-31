@@ -177,6 +177,7 @@ class ServerProvisioner(
         } catch (e: Exception) {
             process.destroyForcibly()
             rs.status = "failed"
+            rs.lastError = e.message ?: "boot failed"
             rs.process = null
             throw e
         }
@@ -202,6 +203,24 @@ class ServerProvisioner(
             logger("Server $requestId already running", error = false)
             return
         }
+        if (rs.status == "provisioning" && rs.process?.isAlive == true) {
+            // Boot already in progress (e.g. create_server auto-boot). Do NOT launch a
+            // second JVM on the same world - it would die on the session.lock.
+            logger("Server $requestId boot already in progress - start ignored", error = false)
+            return
+        }
+
+        // If the world port is already served by an orphan JVM (survived a core restart),
+        // adopt it instead of launching a second process that dies on the session.lock.
+        if (isPortListening(meta.port)) {
+            logger("Server $requestId port ${meta.port} already listening - adopting running process", error = false)
+            rs.status = "running"
+            if (rs.console == null) {
+                val logFile = rotateLog(workspace)
+                rs.console = ConsoleRouter(logFile).also { it.start() }
+            }
+            return
+        }
 
         val logFile = rotateLog(workspace)
         if (rs.console == null) rs.console = ConsoleRouter(logFile).also { it.start() }
@@ -216,6 +235,7 @@ class ServerProvisioner(
         } catch (e: Exception) {
             process.destroyForcibly()
             rs.status = "failed"
+            rs.lastError = e.message ?: "boot failed"
             rs.process = null
             throw e
         }
@@ -275,6 +295,13 @@ class ServerProvisioner(
     }
 
     // ---- port listening wait ----
+
+    private fun isPortListening(port: Int): Boolean = try {
+        java.net.Socket().use { sock ->
+            sock.connect(java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), port), 300)
+            true
+        }
+    } catch (e: Exception) { false }
 
     private fun waitUntilListening(port: Int, process: Process, console: ConsoleRouter?, timeoutMs: Long) {
         val deadline = System.currentTimeMillis() + timeoutMs
