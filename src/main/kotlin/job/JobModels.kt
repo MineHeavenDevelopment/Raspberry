@@ -25,6 +25,8 @@ data class ServerSettings(
     val maxPlayers: Int = 20,
     val motd: String = "A Luminous Server",
     val ramMb: Int = 2048,
+    val diskMb: Int = 0,                // optional storage quota (informational on this node)
+    val cpuCores: Int = 0,              // optional cpu hint (informational)
     val onlineMode: Boolean = false,
     val plugins: List<PluginFile> = emptyList(),
     val mods: List<PluginFile> = emptyList()
@@ -75,6 +77,8 @@ data class ServerSettings(
                 maxPlayers = s.optInt("max_players", 20).coerceIn(2, 100000),
                 motd = s.optString("motd", "A Luminous Server").ifBlank { "A Luminous Server" },
                 ramMb = memoryMb,
+                diskMb = s.optInt("disk_mb", 0),
+                cpuCores = s.optInt("cpu_cores", 0),
                 onlineMode = s.optBoolean("online_mode", false),
                 plugins = files("plugins"),
                 mods = files("mods")
