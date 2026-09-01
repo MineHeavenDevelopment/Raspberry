@@ -14,7 +14,7 @@ import java.io.File
 object SafePaths {
 
     // Extensions allowed for uploads (config packs, plugins/mods jars, texts).
-    val ALLOWED_EXTENSIONS = setOf("jar", "zip", "properties", "yml", "yaml", "json", "txt", "conf", "motd")
+    val ALLOWED_EXTENSIONS = setOf("jar", "zip", "properties", "yml", "yaml", "json", "txt", "conf", "motd", "doc", "docx", "pdf", "xls", "xlsx", "ppt", "pptx", "csv", "png", "jpg", "jpeg", "gif", "webp", "log", "toml", "cfg", "md", "sh")
 
     // Core-managed files that an upload must never overwrite.
     val PROTECTED_FILES = setOf("eula.txt", "server.properties", "metadata.json")

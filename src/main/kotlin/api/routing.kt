@@ -438,7 +438,38 @@ fun Application.module() {
                     return@get respondJson(call, JSONObject().put("error", "unknown server_id on this node"), HttpStatusCode.NotFound)
                 }
                 val subdir = call.request.queryParameters["subdir"] ?: "plugins"
-                when (val check = SafePaths.validateListDir(root, subdir)) {
+                if (subdir == "all") {
+                    // Recursive read-only listing of the entire server workspace
+                    val arr = JSONArray()
+                    val maxFiles = 2000
+                    var count = 0
+                    fun walk(dir: File, prefix: String) {
+                        if (count >= maxFiles) return
+                        for (f in dir.listFiles()?.sortedBy { it.name } ?: emptyList()) {
+                            if (count >= maxFiles) return
+                            if (f.isDirectory) {
+                                arr.put(JSONObject().apply {
+                                    put("name", prefix + f.name + "/")
+                                    put("size", 0)
+                                    put("modified_at", f.lastModified())
+                                    put("dir", true)
+                                })
+                                count++
+                                walk(f, prefix + f.name + "/")
+                            } else {
+                                arr.put(JSONObject().apply {
+                                    put("name", prefix + f.name)
+                                    put("size", f.length())
+                                    put("modified_at", f.lastModified())
+                                    put("dir", false)
+                                })
+                                count++
+                            }
+                        }
+                    }
+                    walk(root, "")
+                    respondJson(call, JSONObject().put("subdir", "all").put("files", arr))
+                } else when (val check = SafePaths.validateListDir(root, subdir)) {
                     is SafePaths.Validation.Reject ->
                         respondJson(call, JSONObject().put("error", check.reason), HttpStatusCode.BadRequest)
                     is SafePaths.Validation.Ok -> {
@@ -459,6 +490,49 @@ fun Application.module() {
                 }
             }
 
+            // Zip the whole server workspace into ./backups/{id}-{ts}.zip
+            post("/servers/{request_id}/backup") {
+                if (!call.authorized(config)) return@post
+                val id = sanitizeId(call.parameters["request_id"] ?: "")
+                if (id.isEmpty()) {
+                    return@post respondJson(call, JSONObject().put("error", "missing request_id"), HttpStatusCode.BadRequest)
+                }
+                val root = File("./servers/$id")
+                if (!File(root, "metadata.json").exists()) {
+                    return@post respondJson(call, JSONObject().put("error", "unknown server_id on this node"), HttpStatusCode.NotFound)
+                }
+                try {
+                    val backupsDir = File("./backups").apply { mkdirs() }
+                    val ts = java.time.LocalDateTime.now().toString().replace(":", "-").replace(".", "-")
+                    val dest = File(backupsDir, id + "-" + ts + ".zip")
+                    val source = root.toPath()
+                    java.util.zip.ZipOutputStream(dest.outputStream().buffered()).use { zos ->
+                        java.nio.file.Files.walk(source).use { walk ->
+                            walk.filter { p -> java.nio.file.Files.isRegularFile(p) }
+                                .forEach { p ->
+                                    val entryName = source.relativize(p).toString().replace('\\', '/')
+                                    zos.putNextEntry(java.util.zip.ZipEntry(entryName))
+                                    java.nio.file.Files.copy(p, zos)
+                                    zos.closeEntry()
+                                }
+                        }
+                    }
+                    respondJson(call, JSONObject().put("ok", true).put("file", dest.name).put("size", dest.length()))
+                } catch (e: Exception) {
+                    respondJson(call, JSONObject().put("error", "backup failed: ${e.message}"), HttpStatusCode.InternalServerError)
+                }
+            }
+            // List backups for a server
+            get("/servers/{request_id}/backup") {
+                if (!call.authorized(config)) return@get
+                val id = sanitizeId(call.parameters["request_id"] ?: "")
+                val backupsDir = File("./backups")
+                val files = backupsDir.listFiles { f -> f.name.startsWith(id + "-") && f.name.endsWith(".zip") }
+                    ?.sortedByDescending { it.lastModified() } ?: emptyList()
+                val arr = org.json.JSONArray()
+                files.forEach { f -> arr.put(JSONObject().put("file", f.name).put("size", f.length()).put("at", f.lastModified())) }
+                respondJson(call, JSONObject().put("backups", arr))
+            }
             post("/servers/{request_id}/files") {
                 if (!call.authorized(config)) return@post
                 if (rateLimited(call, CoreRateLimits.files)) return@post
