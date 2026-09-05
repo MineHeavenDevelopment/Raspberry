@@ -31,7 +31,8 @@ class PortAllocator(
             return it
         }
         val used = allocated.values.toHashSet()
-        for (port in startPort..endPort) {
+        // pick a RANDOM free port so every new server lands on a different port
+        for (port in (startPort..endPort).shuffled()) {
             if (used.contains(port)) continue
             if (!isPortFree(port)) continue
             allocated[requestId] = port

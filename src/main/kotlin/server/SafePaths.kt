@@ -22,6 +22,21 @@ object SafePaths {
     // Top-level folders an upload may target; anything else is rejected.
     val ALLOWED_SUBDIRS = setOf("plugins", "mods", "root")
 
+    // Resolve a user-supplied relative path under [subdir] (root/plugins/mods).
+    // Returns the normalized File or null when it escapes the server root or
+    // contains traversal segments. Empty relPath -> the subdir dir itself.
+    fun safeResolve(serverRoot: File, subdir: String, relPath: String): File? {
+        val cleanSubdir = subdir.trim().lowercase()
+        if (cleanSubdir !in ALLOWED_SUBDIRS) return null
+        val root = serverRoot.absoluteFile.normalize()
+        val base = if (cleanSubdir == "root") root else File(root, cleanSubdir).normalize()
+        val rel = relPath.replace('\\', '/').trim().trim('/')
+        if (rel.isEmpty()) return base
+        if (rel.contains("..") || rel.contains('\u0000')) return null
+        val dest = File(base, rel).normalize()
+        return if (dest.path.startsWith(root.path)) dest else null
+    }
+
     sealed class Validation {
         data class Ok(val file: File) : Validation()
         data class Reject(val reason: String) : Validation()

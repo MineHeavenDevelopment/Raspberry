@@ -337,7 +337,13 @@ fun Application.module() {
                 }
                 val subdir = call.request.queryParameters["subdir"] ?: "plugins"
                 val name = call.request.queryParameters["name"] ?: ""
-                when (val check = SafePaths.validateRead(root, subdir, name)) {
+                // Nested download: "name" may contain '/' under subdir
+                val nestedDl = name.contains('/')
+                val dlFile = if (nestedDl) SafePaths.safeResolve(root, subdir, name) else null
+                when (val check = if (nestedDl) {
+                    if (dlFile == null || dlFile.isDirectory || dlFile.name == "metadata.json") SafePaths.Validation.Reject("invalid path")
+                    else SafePaths.Validation.Ok(dlFile)
+                } else SafePaths.validateRead(root, subdir, name)) {
                     is SafePaths.Validation.Reject ->
                         respondJson(call, JSONObject().put("error", check.reason), HttpStatusCode.BadRequest)
                     is SafePaths.Validation.Ok -> {
@@ -396,7 +402,15 @@ fun Application.module() {
                 }
                 val subdir = call.request.queryParameters["subdir"] ?: "plugins"
                 val name = call.request.queryParameters["name"] ?: ""
-                when (val check = SafePaths.validateEdit(root, subdir, name)) {
+                when (val check = if (name.contains('/')) {
+                    val dest = SafePaths.safeResolve(root, subdir, name)
+                    if (dest == null || dest.name == "metadata.json") SafePaths.Validation.Reject("invalid path")
+                    else {
+                        val ext = dest.extension.lowercase()
+                        if (ext !in SafePaths.EDITABLE_EXTENSIONS) SafePaths.Validation.Reject("only text files can be edited")
+                        else SafePaths.Validation.Ok(dest)
+                    }
+                } else SafePaths.validateEdit(root, subdir, name)) {
                     is SafePaths.Validation.Reject ->
                         respondJson(call, JSONObject().put("error", check.reason), HttpStatusCode.BadRequest)
                     is SafePaths.Validation.Ok -> {
@@ -473,9 +487,22 @@ fun Application.module() {
                     is SafePaths.Validation.Reject ->
                         respondJson(call, JSONObject().put("error", check.reason), HttpStatusCode.BadRequest)
                     is SafePaths.Validation.Ok -> {
-                        val dir = check.file
+                        // Optional nested path (folder browsing)
+                        val relDir = call.request.queryParameters["path"] ?: ""
+                        val dir = if (relDir.isNotBlank()) (SafePaths.safeResolve(root, subdir, relDir)?.takeIf { it.isDirectory } ?: run {
+                            respondJson(call, JSONObject().put("error", "invalid path"), HttpStatusCode.BadRequest)
+                            return@get
+                        }) else check.file
                         val arr = JSONArray()
                         if (dir.exists()) {
+                                for (d in dir.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name } ?: emptyList()) {
+                                    arr.put(JSONObject().apply {
+                                        put("name", d.name + "/")
+                                        put("size", 0)
+                                        put("modified_at", d.lastModified())
+                                        put("dir", true)
+                                    })
+                                }
                             for (f in dir.listFiles()?.sortedBy { it.name } ?: emptyList()) {
                                 if (!f.isFile) continue
                                 arr.put(JSONObject().apply {
